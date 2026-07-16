@@ -104,13 +104,12 @@ echo "[install] ${SERVICE_NAME}.service enabled and started"
 
 if [[ "${SKIP_FAILOVER:-0}" != "1" ]]; then
   install -d -m 0755 /usr/local/libexec/sing-box-vpn
-  if [[ ! -e /usr/local/libexec/sing-box-vpn/failover.sh ]]; then
-    install -m 0755 "$PROJECT_DIR/failover.sh" /usr/local/libexec/sing-box-vpn/failover.sh
-  fi
+  install -m 0755 "$PROJECT_DIR/failover.sh" /usr/local/libexec/sing-box-vpn/failover.sh
+  install -m 0755 "$PROJECT_DIR/vpn"          /usr/local/libexec/sing-box-vpn/vpn
   install -d -m 0755 /usr/local/bin
   ln -sf /usr/local/libexec/sing-box-vpn/failover.sh /usr/local/bin/vpn-failover
   if [[ ! -e /usr/local/bin/vpn ]]; then
-    ln -sf "$PROJECT_DIR/vpn" /usr/local/bin/vpn
+    ln -sf /usr/local/libexec/sing-box-vpn/vpn /usr/local/bin/vpn
   fi
   install -m 0644 "$PROJECT_DIR/contrib/systemd/vpn-failover.service" /etc/systemd/system/vpn-failover.service
   install -m 0644 "$PROJECT_DIR/contrib/systemd/vpn-failover.timer"   /etc/systemd/system/vpn-failover.timer

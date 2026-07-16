@@ -26,7 +26,13 @@ resolve_project_dir() {
 }
 
 PROJECT_DIR="${PROJECT_DIR:-$(resolve_project_dir)}"
-VPN="${VPN:-$PROJECT_DIR/vpn}"
+if [[ -z "${VPN:-}" ]]; then
+  if command -v vpn >/dev/null 2>&1; then
+    VPN="$(command -v vpn)"
+  else
+    VPN="$PROJECT_DIR/vpn"
+  fi
+fi
 TRACE_HOST="${TRACE_HOST:-https://cloudflare.com/cdn-cgi/trace}"
 PROBE_TIMEOUT="${PROBE_TIMEOUT:-8}"
 MIXED_PORT="${MIXED_PORT:-12334}"
