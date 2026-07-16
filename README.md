@@ -101,57 +101,6 @@ The host needs either:
 Servers themselves do not need IPv6 unless a profile points at them.
 Dual-stack inside sing-box covers both.
 
-## Production readiness checklist
-
-Run through this on a fresh host before relying on the system.
-
-### Code / repo
-
-- [x] All scripts executable: `chmod +x ./vpn ./apply-profiles.sh ./test-all.sh ./generate-config.sh ./install.sh ./rollback.sh`
-- [x] Single root-commit in git; `git log --oneline` shows one line
-- [x] `git ls-files profiles/` is empty; `profiles/**` is in `.gitignore`
-- [x] No secret-leaking documentation: `grep -RE "(password|token|key|secret|api_key|private_key)=" docs/ README.md ARCHITECTURE.md` returns nothing
-- [x] `bash -n vpn` / `bash -n apply-profiles.sh` / `bash -n test-all.sh` passes
-- [x] `docs/{PROFILES,IPV6,OPERATIONS,ARCHITECTURE}.md` describe flow
-
-### Runtime
-
-- [ ] `sing-box -c "$CONFIG_OUT"` validates (run after every `apply-profiles.sh`)
-- [ ] `systemctl is-active $SERVICE_NAME.service` → `active`
-- [ ] `ss -tln | grep -E "${MIXED_PORT}|9090"` shows SOCKS + clash API
-- [ ] `vpn list` shows every profile you expect, active one marked `*`
-- [ ] `vpn test` returns a non-empty trace line for the active profile
-- [ ] For IPv6-only profiles: `ip -6 route show default` exists on the host
-
-### Host-level
-
-- [ ] If you SSH into VPSes, your per-host allowlist lists every
-      remote target this client might connect to, with the right
-      `read_only_default` and `approval_required_for`
-- [ ] No recent root-password leak on any entry — rotate keys and
-      require key-only SSH on newly-added hosts
-- [ ] Shell history is scrubbed of `PBK=`, `SID=`, `UUID=` lines for
-      secrets pasted in shell. Use `set +o history` (bash) or
-      `set fish_history to none` before pasting credentials; or use a
-      `pass`-style encrypted store from the start
-- [ ] If you run a CPU watchdog on the host, add an exclude pattern
-      covering the sing-box client process and idle-network state so
-      it doesn't kill the VPN client on sustained high CPU
-- [ ] Sing-box does not need setuid; a regular unprivileged user can
-      run `vpn list`/`test`; only mutating commands require `sudo`
-
-### Monitoring (optional but recommended)
-
-- [ ] `journalctl -u $SERVICE_NAME -f | grep -iE 'error|warn|disconnected'` streams into your log alert
-- [ ] A daily `vpn test` round from cron, with failure notifications
-- [ ] `SystemMaxUse` on the journal so the unit can't fill `/var/log/journal`
-- [ ] Auto-failover: `systemctl enable --now vpn-failover.timer` — rotates to a working profile within 5 minutes of an active profile becoming unreachable (see [docs/FAILOVER.md](docs/FAILOVER.md))
-
-### Reversibility
-
-- [ ] `git log --stat -- profiles/` shows nothing
-- [ ] You can reproduce from clean state: `git clone` + `sudo ./install.sh` rebuilds the runtime
-
 ## What this is **not**
 
 - Not a server-side installer. The server-side runbook lives
