@@ -42,10 +42,7 @@
       "type": "tproxy",
       "tag": "tproxy-in",
       "listen": "::",
-      "listen_port": 12335,
-      "network": "tcp",
-      "sniff": true,
-      "sniff_override_destination": true
+      "listen_port": 12335
     },
     {
       "type": "mixed",
@@ -67,7 +64,11 @@
     }
   ],
   "route": {
+    "default_domain_resolver": "dns-direct",
     "rules": [
+      {
+        "action": "sniff"
+      },
       {
         "port": 53,
         "action": "hijack-dns"
