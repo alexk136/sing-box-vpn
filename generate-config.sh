@@ -64,6 +64,8 @@ for k, v in profile.items():
 new_outbounds = []
 inserted = False
 for ob in cfg["outbounds"]:
+    if ob.get("tag") == "proxy-out":
+        continue
     new_outbounds.append(ob)
     if ob.get("type") == "selector" and not inserted:
         new_outbounds.append(proxy_out)

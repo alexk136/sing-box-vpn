@@ -61,6 +61,10 @@
     {
       "type": "direct",
       "tag": "direct"
+    },
+    {
+      "type": "direct",
+      "tag": "proxy-out"
     }
   ],
   "route": {
