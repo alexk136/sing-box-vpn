@@ -37,9 +37,9 @@ profile outbound, regardless of family.
 |---|---|---|
 | IPv4 default route | up | wifi `wlp14s0f3u2` |
 | IPv6 default route | **down** at the time of this redesign | `enp7s0` DOWN; `wlp*` interfaces have no `inet6` route to upstream |
-| `ping 2a03:f480:1:c::1b` | `Network is unreachable` | expected given the missing default route |
+| `ping 2001:db8::1` | `Network is unreachable` | expected given the missing default route |
 | `tcp46` to a profile server | works (default-route over IPv4) | normal traffic |
-| `tcp6` to `[2a03:f480:1:c::1b]` | only works **through VPN** (tun0), not directly | see below |
+| `tcp6` to `[2001:db8::1]` | only works **through VPN** (tun0), not directly | see below |
 
 If the host has IPv6 to upstream, no config change is needed — sing-box
 will use it automatically. If not, traffic falls back to IPv4 and that
@@ -68,7 +68,7 @@ For VPSes reachable only over IPv6, use bracketed form:
 ```json
 {
   "type": "hysteria2",
-  "server": "[2a03:f480:1:c::1b]",
+  "server": "[2001:db8::1]",
   "server_port": 8443,
   "password": "...",
   "tls": { "enabled": true, "server_name": "vps.example.com", "insecure": true }

@@ -96,3 +96,37 @@ tail -f /var/log/sing-box.log              # if output path is set
 sudo $PROJECT_DIR/generate-config.sh
 sudo systemctl restart sing-box
 ```
+
+## Known state (as of last commit on master)
+
+Run `vpn list` on the host to see actual profile filenames and their
+descriptions. The summary below describes a typical state where most
+profiles are working and a couple are not.
+
+| Type | Count | Status |
+|---|---|---|
+| Working | typical: 4–6 | ✅ |
+| Server-side issue | 0–2 | ❌ needs VPS admin |
+| Network setup needed | 0–1 | ❌ needs IPv6 on host |
+
+The actual server endpoints, ports, and credentials live in
+`profiles/<name>.json` (gitignored). Use `vpn list` to inspect them
+locally; the public repo does not contain real endpoint metadata.
+
+Non-working profiles are kept on disk for documentation but are
+skipped by `failover.sh` until underlying issues are resolved.
+
+## sing-box 1.12+ compatibility
+
+Since the 2026-07-16 upgrade to `sing-box-bin 1.13.14`, the project
+ships with `/etc/systemd/system/sing-box.service.d/deprecated-dns.conf`
+which sets these env vars:
+
+- `ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true`
+- `ENABLE_DEPRECATED_LEGACY_INBOUND_FIELDS=true`
+- `ENABLE_DEPRECATED_LEGACY_OUTBOUND_FIELDS=true`
+
+These are temporary bypasses for legacy schema fields. When
+`sing-box-bin` jumps to 1.14+, this drop-in must be replaced by a full
+template migration to the new DNS server / outbound / inbound schema,
+otherwise the service will refuse to start.

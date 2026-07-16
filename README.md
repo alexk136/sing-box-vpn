@@ -44,6 +44,7 @@ environment overrides, and exit-code reference.
 | Start VPN | `sudo vpn on` |
 | Stop VPN | `sudo vpn off` |
 | Status | `vpn status` |
+| Trigger failover probe | `sudo systemctl start vpn-failover.service` |
 
 A profile **auto-discovers** from `profiles/*.json` — drop a new
 `<name>.json` in there and it is picked up by `apply-profiles.sh`,
@@ -77,11 +78,21 @@ Notes:
 |---|---|---|
 | Linux kernel | 4.18+ | full feature support |
 | `systemd` | 245+ | unit management |
-| `sing-box` (binary) | 1.11.0 | client and runtime. v1.13 has breaking DNS API |
+| **`sing-box` (binary)** | **1.13.0+** | the project ships with the 1.13+ schema (legacy inbound fields removed, `default_domain_resolver` required). The host now runs 1.13.14. See [CHANGELOG.md](CHANGELOG.md) for the 1.11→1.13 migration. |
 | `python3` | 3.8+ | URL parser in `vpn` |
 | `curl` | any | connectivity tests |
 | `bash` | 4.0+ | shell aliases (optional) |
+| `fish` | 3.0+ | only if you want the fish aliases |
 | `sudo` | any | mutating commands (`on/off/use/add/add-json/del`, `apply-profiles.sh`, `install.sh`) |
+
+If you are running an older `sing-box` (1.11 or 1.12), the project still
+works but the template uses `route.default_domain_resolver` and the
+`action: sniff` rule shape. To run on 1.11.0, you need to either
+upgrade the binary to 1.13+ (recommended, see
+[AUR `sing-box-bin`](https://aur.archlinux.org/packages/sing-box-bin))
+or revert the template to the legacy `sniff: true` / `sniff_override_destination: true` on the inbound and remove `route.default_domain_resolver`. The legacy
+schema is permanently removed in 1.13.0 and `ENABLE_DEPRECATED_*`
+env vars only delay removal, they do not restore removed fields.
 
 ### Soft (nice to have)
 

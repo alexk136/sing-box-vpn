@@ -51,7 +51,7 @@ use the literal IPv6 form (note the brackets where applicable):
 ```json
 {
   "type": "hysteria2",
-  "server": "[2a03:f480:1:c::1b]",
+  "server": "2606:4700:4700::1",
   "server_port": 8443,
   ...
 }
