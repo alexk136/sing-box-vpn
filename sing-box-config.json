@@ -13,12 +13,6 @@
         "detour": "proxy-out"
       },
       {
-        "tag": "dns-remote-v6",
-        "address": "https://[2606:4700:4700::1111]/dns-query",
-        "address_resolver": "dns-direct",
-        "detour": "proxy-out"
-      },
-      {
         "tag": "dns-direct",
         "address": "https://1.1.1.1/dns-query",
         "detour": "direct"
