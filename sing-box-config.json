@@ -107,14 +107,12 @@
         "action": "reject"
       },
       {
+        "domain_suffix": [
+          ".local",
+          ".localhost"
+        ],
         "action": "resolve",
-        "server": "dns-system-hosts",
-        "rule_set": "private-domains"
-      },
-      {
-        "action": "resolve",
-        "server": "dns-lan",
-        "rule_set": "private-domains"
+        "server": "dns-system-hosts"
       },
       {
         "rule_set": "private-domains",
@@ -126,14 +124,6 @@
           "10.0.0.0/8",
           "172.16.0.0/12",
           "192.168.0.0/16"
-        ],
-        "outbound": "direct"
-      },
-      {
-        "domain_suffix": [
-          ".elrise.local",
-          ".local",
-          ".localhost"
         ],
         "outbound": "direct"
       },
