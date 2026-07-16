@@ -74,6 +74,13 @@
         "action": "hijack-dns"
       },
       {
+        "ip_cidr": [
+          "127.0.0.0/8",
+          "::1/128"
+        ],
+        "action": "reject"
+      },
+      {
         "domain_suffix": ".ru",
         "outbound": "direct"
       },
@@ -85,7 +92,6 @@
         "ip_cidr": [
           "fc00::/7",
           "fe80::/10",
-          "::1/128",
           "100::/64",
           "2001:db8::/32"
         ],
