@@ -102,6 +102,19 @@ systemctl daemon-reload
 systemctl enable --now "$SERVICE_NAME"
 echo "[install] ${SERVICE_NAME}.service enabled and started"
 
+# private-domains.txt — operator-editable list of domain suffixes
+# that should bypass the SOCKS proxy (loopback, mDNS, internal LAN
+# domains, etc.). See docs/EXCEPTIONS.md. install.sh creates the file
+# with sane defaults if it does not exist; existing files are kept
+# (no clobber) so operator edits survive re-installs.
+PRIVATE_DOMAINS_FILE="$RUNTIME_DIR/private-domains.txt"
+if [[ ! -f "$PRIVATE_DOMAINS_FILE" ]]; then
+  install -m 0640 "$PROJECT_DIR/etc-sing-box-private-domains.txt" "$PRIVATE_DOMAINS_FILE"
+  echo "[install] created $PRIVATE_DOMAINS_FILE (edit to add bypasses)"
+else
+  echo "[install] keeping existing $PRIVATE_DOMAINS_FILE"
+fi
+
 if [[ "${SKIP_FAILOVER:-0}" != "1" ]]; then
   install -d -m 0755 /usr/local/libexec/sing-box-vpn
   install -m 0755 "$PROJECT_DIR/failover.sh" /usr/local/libexec/sing-box-vpn/failover.sh

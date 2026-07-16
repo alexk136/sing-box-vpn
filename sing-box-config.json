@@ -69,6 +69,14 @@
   ],
   "route": {
     "default_domain_resolver": "dns-direct",
+    "rule_set": [
+      {
+        "type": "local",
+        "tag": "private-domains",
+        "format": "source",
+        "path": "/etc/sing-box/private-domains.txt"
+      }
+    ],
     "rules": [
       {
         "action": "sniff"
@@ -83,6 +91,10 @@
           "::1/128"
         ],
         "action": "reject"
+      },
+      {
+        "rule_set": "private-domains",
+        "outbound": "direct"
       },
       {
         "domain_suffix": ".ru",

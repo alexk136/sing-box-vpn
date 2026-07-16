@@ -1,0 +1,27 @@
+# Private domains — bypass SOCKS proxy.
+#
+# One domain suffix per line. Lines starting with '#' are comments;
+# blank lines are ignored. Matching is by suffix, so
+#   example.com
+# matches foo.example.com, bar.example.com, etc.
+#
+# Default entries below cover the most common loopback / mDNS cases.
+# Add your own suffixes (e.g. internal.corp, lab.local) as needed.
+#
+# After editing, sing-box reload is not required if the rule_set was
+# loaded once; a service restart picks up changes. To restart:
+#   sudo systemctl restart sing-box
+#
+# To validate the file (sing-box 1.13+ checks syntax):
+#   sudo /usr/bin/sing-box check -c /etc/sing-box/config.json
+#
+# To inspect what the live config sees:
+#   sudo /usr/bin/sing-box check -c /etc/sing-box/config.json --rule-set private-domains
+
+# mDNS / link-local hostnames
+.local
+
+# Plain "localhost" hostname (covers the bare word; the 127.0.0.0/8
+# and ::1/128 ranges are handled separately by the IP-CIDR rule in
+# sing-box-config.json)
+localhost
