@@ -1,0 +1,32 @@
+# Editor / shell / OS noise
+*~
+.*.swp
+*.bak
+*.bak.*
+*.tmp
+
+# Python (the inline blocks in vpn.sh use python3)
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local config overrides
+.env
+.envrc
+.vpn-state
+
+# Backup files left by rollback.sh / apply-profiles.sh
+*.before-redact
+
+# Git / project noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Real VPN profiles (contain credentials) are gitignored entirely.
+# The profiles/ directory holds only runtime secrets; copy a template
+# from docs/examples/ to profiles/<your-name>.json and fill in real
+# values. See docs/PROFILES.md for details.
+profiles/
+profiles/**

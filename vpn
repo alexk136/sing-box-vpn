@@ -1,0 +1,404 @@
+#!/usr/bin/env bash
+# sing-box VPN profile manager
+# Source of truth: profiles/*.json (one JSON file per outbound).
+# Apply to runtime via sudo ./apply-profiles.sh.
+# Paths: auto-detect PROJECT_DIR from $0; RUNTIME_DIR is /etc/sing-box by
+# default, override with RUNTIME_DIR=/path/to/dir env var.
+
+set -euo pipefail
+
+resolve_project_dir() {
+  local source="${BASH_SOURCE[0]}"
+  while [ -L "$source" ]; do
+    local dir
+    dir=$(dirname "$source")
+    source=$(readlink "$source")
+    [[ "$source" != /* ]] && source="$dir/$source"
+  done
+  (cd "$(dirname "$source")" && pwd -P)
+}
+
+PROJECT_DIR="${PROJECT_DIR:-$(resolve_project_dir)}"
+RUNTIME_DIR="${RUNTIME_DIR:-/etc/sing-box}"
+PROFILES_DIR="${PROFILES_DIR:-$PROJECT_DIR/profiles}"
+RUNTIME_PROFILES_DIR="${RUNTIME_PROFILES_DIR:-$RUNTIME_DIR/profiles}"
+ACTIVE_FILE="${ACTIVE_FILE:-$RUNTIME_DIR/active_profile}"
+CONFIG_TEMPLATE="${CONFIG_TEMPLATE:-$PROJECT_DIR/sing-box-config.json}"
+CONFIG_OUT="${CONFIG_OUT:-$RUNTIME_DIR/config.json}"
+GEN_SCRIPT="${GEN_SCRIPT:-$PROJECT_DIR/generate-config.sh}"
+SERVICE_NAME="${SERVICE_NAME:-sing-box}"
+MIXED_PORT="${MIXED_PORT:-12334}"
+
+usage() {
+  cat <<EOF
+Usage: sudo $0 <command> [args]
+
+Commands:
+  on                          Enable VPN (apply iptables, start sing-box)
+  off                         Disable VPN (stop sing-box, flush nftables)
+  restart                     Restart sing-box service
+  status                      Show service + tunnel status
+  list                        List available profiles (glob profiles/*.json)
+  current                     Show current active profile
+  use <name>                  Switch to profile <name>
+  add <name> <url>            Add a profile from URL into profiles/<name>.json
+                              Supports: vless:// hy2:// hysteria2:// ss://
+                              vmess:// trojan://
+  add-json <name> <file>      Add a profile from a JSON file (validated)
+  del <name>                  Delete a profile
+  test                        Test VPN connectivity via SOCKS
+  help                        Show this help
+
+Environment overrides:
+  PROJECT_DIR         source directory (auto)
+  RUNTIME_DIR         runtime root (default $RUNTIME_DIR)
+  RUNTIME_PROFILES_DIR overrides the runtime profiles dir
+  ACTIVE_FILE         active profile marker file
+  CONFIG_TEMPLATE     template JSON path
+  CONFIG_OUT          generated config path
+  SERVICE_NAME        systemd unit name (default $SERVICE_NAME)
+  MIXED_PORT          SOCKS port (default $MIXED_PORT)
+
+Examples:
+  sudo $0 on
+  $0 list
+  sudo $0 use warp-client
+  sudo $0 add my-vps 'hy2://PASSWORD@vpn.example:8443/?sni=vpn.example&insecure=1#my-vps'
+  sudo $0 add-json my-vps ./my-vps.json
+  $0 test
+EOF
+}
+
+ensure_root() {
+  if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: this command requires root (sudo $0 $*)"
+    exit 1
+  fi
+}
+
+list_profiles() {
+  echo "Available profiles (source: $PROFILES_DIR):"
+  local current=""
+  [[ -f "$ACTIVE_FILE" ]] && current=$(cat "$ACTIVE_FILE")
+  local f
+  for f in "$PROFILES_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+    local name desc
+    name=$(basename "$f" .json)
+    desc=$(python3 -c "import json,sys; d=json.load(open('$f')); print(d.get('description',''))" 2>/dev/null || echo "")
+    local marker="  "
+    [[ "$name" == "$current" ]] && marker="* "
+    echo "  $marker$name  ($desc)"
+  done
+}
+
+current_profile() {
+  if [[ -f "$ACTIVE_FILE" ]]; then
+    cat "$ACTIVE_FILE"
+  else
+    echo "(none)"
+  fi
+}
+
+add_profile() {
+  local name="$1"
+  local url="$2"
+  local file="$PROFILES_DIR/$name.json"
+
+  if [[ -f "$file" ]]; then
+    echo "ERROR: profile '$name' already exists at $file"
+    exit 1
+  fi
+
+  python3 - "$name" "$url" "$file" <<'PYEOF'
+import sys, json, base64, urllib.parse
+
+name, url, outfile = sys.argv[1], sys.argv[2], sys.argv[3]
+
+parsed = urllib.parse.urlparse(url)
+scheme = parsed.scheme.lower()
+if scheme not in ("vless", "hy2", "hysteria2", "ss", "vmess", "trojan"):
+    sys.exit(f"ERROR: unsupported scheme '{scheme}'. Supported: vless, hy2, hysteria2, ss, vmess, trojan. Use add-json for raw JSON.")
+
+fragment = urllib.parse.unquote(parsed.fragment) if parsed.fragment else name
+qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+def first(k, default=""):
+    v = qs.get(k)
+    return v[0] if v else default
+
+if scheme == "vless":
+    if "@" not in parsed.netloc:
+        sys.exit("ERROR: invalid vless URL (no @)")
+    uuid, hostport = parsed.netloc.split("@", 1)
+    if ":" not in hostport:
+        sys.exit("ERROR: invalid vless URL (no port)")
+    host_port = hostport.strip("[]")
+    server, port = host_port.rsplit(":", 1)
+    if not port.isdigit():
+        sys.exit("ERROR: invalid vless URL (port not numeric)")
+    cfg = {
+        "name": name,
+        "description": f"vless {server}:{port}",
+        "type": "vless",
+        "server": server,
+        "server_port": int(port),
+        "uuid": uuid,
+        "packet_encoding": "xudp",
+        "flow": first("flow", ""),
+    }
+    security = first("security")
+    if security in ("reality", "tls"):
+        cfg["security"] = security
+        cfg["tls"] = {"enabled": True}
+        for k in ("sni", "alpn", "fp"):
+            if k in qs:
+                cfg["tls"][{"sni": "server_name"}.get(k, k)] = first(k)
+        if security == "reality":
+            tls = cfg["tls"]
+            tls["utls"] = {"enabled": True, "fingerprint": first("fp", "chrome")}
+            tls["reality"] = {"enabled": True}
+            if "pbk" in qs:
+                tls["reality"]["public_key"] = first("pbk")
+            if "sid" in qs:
+                tls["reality"]["short_id"] = first("sid")
+
+elif scheme in ("hy2", "hysteria2"):
+    if "@" not in parsed.netloc:
+        sys.exit("ERROR: invalid hysteria2 URL (no @)")
+    password, hostport = parsed.netloc.split("@", 1)
+    host_port = hostport.strip("/").strip("[]")
+    if ":" not in host_port:
+        sys.exit("ERROR: invalid hysteria2 URL (no port)")
+    server, port = host_port.rsplit(":", 1)
+    if not port.isdigit():
+        sys.exit("ERROR: invalid hysteria2 URL (port not numeric)")
+    cfg = {
+        "name": name,
+        "description": f"hysteria2 {server}:{port}",
+        "type": "hysteria2",
+        "server": server,
+        "server_port": int(port),
+        "password": password,
+        "tls": {"enabled": True},
+    }
+    sni = first("sni")
+    if sni:
+        cfg["tls"]["server_name"] = sni
+    if "insecure" in qs:
+        cfg["tls"]["insecure"] = first("insecure", "0") not in ("0", "false", "False", "")
+
+elif scheme == "ss":
+    userinfo, hostport = (parsed.netloc.split("@", 1) + [""])[:2]
+    if not hostport:
+        sys.exit("ERROR: invalid shadowsocks URL (no @)")
+    host_port = hostport.strip("[]")
+    if ":" not in host_port:
+        sys.exit("ERROR: invalid shadowsocks URL (no port)")
+    server, port = host_port.rsplit(":", 1)
+    if not port.isdigit():
+        sys.exit("ERROR: invalid shadowsocks URL (port not numeric)")
+    try:
+        decoded = base64.urlsafe_b64decode(userinfo + "=" * (-len(userinfo) % 4)).decode()
+    except Exception as e:
+        sys.exit(f"ERROR: invalid shadowsocks base64: {e}")
+    if ":" not in decoded:
+        sys.exit("ERROR: invalid shadowsocks userinfo (no method:password)")
+    method, password = decoded.split(":", 1)
+    cfg = {
+        "name": name,
+        "description": f"shadowsocks {server}:{port}",
+        "type": "shadowsocks",
+        "server": server,
+        "server_port": int(port),
+        "method": method,
+        "password": password,
+    }
+
+elif scheme == "trojan":
+    if "@" not in parsed.netloc:
+        sys.exit("ERROR: invalid trojan URL (no @)")
+    password, hostport = parsed.netloc.split("@", 1)
+    host_port = hostport.strip("[]")
+    if ":" not in host_port:
+        sys.exit("ERROR: invalid trojan URL (no port)")
+    server, port = host_port.rsplit(":", 1)
+    if not port.isdigit():
+        sys.exit("ERROR: invalid trojan URL (port not numeric)")
+    cfg = {
+        "name": name,
+        "description": f"trojan {server}:{port}",
+        "type": "trojan",
+        "server": server,
+        "server_port": int(port),
+        "password": password,
+        "tls": {"enabled": True},
+    }
+    sni = first("sni")
+    if sni:
+        cfg["tls"]["server_name"] = sni
+    if "allowInsecure" in qs:
+        cfg["tls"]["insecure"] = first("allowInsecure", "0") in ("1", "true", "True")
+
+elif scheme == "vmess":
+    raw = parsed.netloc or (parsed.path.lstrip("/") if parsed.path else "")
+    if not raw:
+        sys.exit("ERROR: invalid vmess URL (empty payload)")
+    try:
+        decoded = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode()
+    except Exception as e:
+        sys.exit(f"ERROR: invalid vmess base64: {e}")
+    try:
+        v = json.loads(decoded)
+    except Exception as e:
+        sys.exit(f"ERROR: invalid vmess JSON: {e}")
+    cfg = {
+        "name": name,
+        "description": f"vmess {v.get('add','')}:{v.get('port','')}",
+        "type": "vmess",
+        "server": v.get("add", ""),
+        "server_port": int(v.get("port", 0)),
+        "uuid": v.get("id", ""),
+        "alter_id": int(v.get("aid", 0)),
+        "security": v.get("type", "none"),
+    }
+    if str(v.get("tls", "")).lower() in ("tls", "reality"):
+        cfg["tls"] = {"enabled": True, "server_name": v.get("sni", v.get("host", ""))}
+        sni = v.get("sni", "")
+        if sni:
+            cfg["tls"]["server_name"] = sni
+
+if not cfg.get("server") or not cfg.get("server_port"):
+    sys.exit("ERROR: parser did not produce server or server_port")
+
+with open(outfile, "w") as f:
+    json.dump(cfg, f, indent=2)
+print(f"Profile '{name}' added: {cfg['type']} {cfg['server']}:{cfg['server_port']} -> {outfile}")
+PYEOF
+}
+
+add_from_json() {
+  local name="$1"
+  local src="$2"
+  local dst="$PROFILES_DIR/$name.json"
+  if [[ -f "$dst" ]]; then
+    echo "ERROR: profile '$name' already exists at $dst"
+    exit 1
+  fi
+  if [[ ! -f "$src" ]]; then
+    echo "ERROR: source file not found: $src"
+    exit 1
+  fi
+  python3 -c "import json; d=json.load(open('$src')); assert d.get('type') and d.get('server') and d.get('server_port'), 'missing required fields'" || {
+    echo "ERROR: invalid profile JSON (needs type, server, server_port)"
+    exit 1
+  }
+  install -m 0644 "$src" "$dst"
+  echo "Profile '$name' added from $src"
+}
+
+del_profile() {
+  local name="$1"
+  local src="$PROFILES_DIR/$name.json"
+  local runtime="$RUNTIME_PROFILES_DIR/$name.json"
+  if [[ ! -f "$src" && ! -f "$runtime" ]]; then
+    echo "ERROR: profile '$name' not found"
+    exit 1
+  fi
+  if [[ -f "$ACTIVE_FILE" ]] && [[ "$(cat "$ACTIVE_FILE")" == "$name" ]]; then
+    echo "ERROR: cannot delete active profile '$name'; switch first"
+    exit 1
+  fi
+  rm -f "$src" "$runtime"
+  echo "Profile '$name' deleted (both source and runtime)"
+}
+
+use_profile() {
+  local name="$1"
+  local runtime="$RUNTIME_PROFILES_DIR/$name.json"
+  if [[ ! -f "$runtime" ]]; then
+    echo "ERROR: profile '$name' not in runtime $RUNTIME_PROFILES_DIR. Did you run 'sudo ./apply-profiles.sh'?"
+    exit 1
+  fi
+  echo "$name" > "$ACTIVE_FILE"
+  echo "[vpn] active profile: $name"
+  if [[ -x "$GEN_SCRIPT" ]]; then
+    "$GEN_SCRIPT"
+  fi
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    systemctl restart "$SERVICE_NAME"
+    echo "[vpn] $SERVICE_NAME restarted"
+  fi
+  echo "[vpn] test: sudo $PROJECT_DIR/vpn test"
+}
+
+do_on() {
+  echo "[vpn] starting $SERVICE_NAME (SOCKS on 127.0.0.1:$MIXED_PORT)..."
+  systemctl start "$SERVICE_NAME"
+  sleep 2
+  systemctl is-active --quiet "$SERVICE_NAME" && echo "[vpn] $SERVICE_NAME: ACTIVE" || { echo "[vpn] ERROR: $SERVICE_NAME failed to start"; journalctl -u "$SERVICE_NAME" -n 20; exit 1; }
+  if [[ -x "$GEN_SCRIPT" ]]; then
+    "$GEN_SCRIPT" >/dev/null 2>&1 || true
+  fi
+  result=$(curl -sS --max-time 5 --socks5-hostname "127.0.0.1:$MIXED_PORT" https://cloudflare.com/cdn-cgi/trace 2>&1 | grep -E '^(ip|colo)=')
+  if [[ -n "$result" ]]; then
+    echo "$result"
+  else
+    echo "(SOCKS test inconclusive)"
+  fi
+}
+
+do_off() {
+  echo "[vpn] stopping $SERVICE_NAME..."
+  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+  echo "[vpn] VPN is OFF (direct connection restored)"
+}
+
+do_restart() {
+  systemctl restart "$SERVICE_NAME"
+  echo "[vpn] $SERVICE_NAME restarted"
+}
+
+do_status() {
+  echo "=== sing-box VPN status ==="
+  echo "  service: $(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo 'not installed')"
+  echo "  active profile: $(current_profile)"
+  echo "  source profiles: $(ls -1 "$PROFILES_DIR"/*.json 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
+  echo "  runtime profiles: $(ls -1 "$RUNTIME_PROFILES_DIR"/*.json 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
+  echo "  clash API:    $(curl -sS --max-time 2 http://127.0.0.1:9090/version 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version","?"))' 2>/dev/null || echo 'not responding')"
+  echo "  external IP test (direct):"
+  curl -sS --max-time 6 https://cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -E '^(ip|colo|loc)=' || echo "    (no response)"
+}
+
+do_test() {
+  echo "[vpn] testing VPN connectivity via SOCKS..."
+  for i in 1 2 3; do
+    local result
+    result=$(curl -sS --max-time 8 --socks5-hostname "127.0.0.1:$MIXED_PORT" https://cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -E '^(ip|colo|loc)=')
+    if [[ -n "$result" ]]; then
+      echo "$result"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "[vpn] VPN test inconclusive (or direct connection)"
+  return 1
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  on)         ensure_root; do_on ;;
+  off)        ensure_root; do_off ;;
+  restart)    ensure_root; do_restart ;;
+  status)     do_status ;;
+  list)       list_profiles ;;
+  current)    current_profile ;;
+  use)        ensure_root; use_profile "${1:?missing profile name}" ;;
+  add)        ensure_root; add_profile "${1:?missing name}" "${2:?missing url}" ;;
+  add-json)   ensure_root; add_from_json "${1:?missing name}" "${2:?missing json-file}" ;;
+  del)        ensure_root; del_profile "${1:?missing name}" ;;
+  test)       do_test ;;
+  help|--help|-h) usage ;;
+  *) echo "ERROR: unknown command '$cmd'"; usage; exit 1 ;;
+esac

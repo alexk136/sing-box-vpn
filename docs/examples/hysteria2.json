@@ -1,0 +1,13 @@
+{
+  "name": "example-hy2",
+  "description": "Hysteria2 profile template. Copy this file to ../<your-name>.json and fill in real values. The 'name' field MUST match the filename without .json.",
+  "type": "hysteria2",
+  "server": "vpn.example.com",
+  "server_port": 8443,
+  "password": "REPLACE_WITH_PASSWORD",
+  "tls": {
+    "enabled": true,
+    "server_name": "vpn.example.com",
+    "insecure": false
+  }
+}

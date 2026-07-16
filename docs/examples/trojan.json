@@ -1,0 +1,12 @@
+{
+  "name": "example-trojan",
+  "description": "Trojan profile template. Server cert must be valid (or set tls.insecure=true for self-signed).",
+  "type": "trojan",
+  "server": "vpn.example.com",
+  "server_port": 443,
+  "password": "REPLACE_WITH_PASSWORD",
+  "tls": {
+    "enabled": true,
+    "server_name": "vpn.example.com"
+  }
+}

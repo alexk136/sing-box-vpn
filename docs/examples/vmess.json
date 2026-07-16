@@ -1,0 +1,10 @@
+{
+  "name": "example-vmess",
+  "description": "VMess profile template. Use alter_id=0 with AEAD-only servers (v2rayN-style base64 JSON share links are also supported via 'vpn add <name> <vmess://...>').",
+  "type": "vmess",
+  "server": "vpn.example.com",
+  "server_port": 443,
+  "uuid": "00000000-0000-4000-8000-000000000000",
+  "alter_id": 0,
+  "security": "auto"
+}

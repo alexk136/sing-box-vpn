@@ -1,0 +1,9 @@
+{
+  "name": "example-ss",
+  "description": "Shadowsocks profile template. Method: chacha20-ietf-poly1305 or aes-256-gcm.",
+  "type": "shadowsocks",
+  "server": "vpn.example.com",
+  "server_port": 8388,
+  "method": "chacha20-ietf-poly1305",
+  "password": "REPLACE_WITH_PASSWORD"
+}
