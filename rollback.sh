@@ -43,10 +43,12 @@ iptables -t mangle -D PREROUTING -j SINGBOX 2>/dev/null || true
 iptables -t mangle -F SINGBOX 2>/dev/null || true
 iptables -t mangle -X SINGBOX 2>/dev/null || true
 
-if [[ -f /home/*/.config/systemd/user/hiddify.service ]]; then
-  hid_user="$(stat -c '%U' /home/*/.config/systemd/user/hiddify.service 2>/dev/null || echo root)"
-  sudo -u "$hid_user" XDG_RUNTIME_DIR="/run/user/$(id -u "$hid_user")" systemctl --user enable hiddify.service 2>/dev/null || true
-  echo "[rollback] hiddify.service re-enabled"
+if [[ -f /home/*/.config/systemd/user/hiddify.service || -f /home/*/.config/systemd/user/HiddifyCli.service ]]; then
+  local hid_user
+  hid_user="$(stat -c '%U' /home/*/.config/systemd/user/hiddify.service 2>/dev/null || stat -c '%U' /home/*/.config/systemd/user/HiddifyCli.service 2>/dev/null || echo root)"
+  sudo -u "$hid_user" XDG_RUNTIME_DIR="/run/user/$(id -u "$hid_user")" systemctl --user enable hiddify.service 2>/dev/null || \
+    sudo -u "$hid_user" XDG_RUNTIME_DIR="/run/user/$(id -u "$hid_user")" systemctl --user enable HiddifyCli.service 2>/dev/null || true
+  echo "[rollback] prior VPN user service re-enabled"
 fi
 
 echo "[rollback] DONE. Reboot to ensure clean state."

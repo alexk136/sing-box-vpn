@@ -1,0 +1,13 @@
+[Unit]
+Description=Run sing-box VPN failover probe every 5 minutes
+Requires=vpn-failover.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30
+Persistent=true
+Unit=vpn-failover.service
+
+[Install]
+WantedBy=timers.target

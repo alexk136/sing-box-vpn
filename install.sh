@@ -86,11 +86,13 @@ if ! "$SING_BOX_BIN" check -c "$RUNTIME_DIR/config.json"; then
   exit 3
 fi
 
-if [[ -f /home/*/.config/systemd/user/hiddify.service ]] || [[ -f /root/.config/systemd/user/hiddify.service ]]; then
-  local hid_user
-  hid_user="${SUDO_USER:-root}"
-  sudo -u "$hid_user" XDG_RUNTIME_DIR="/run/user/$(id -u "$hid_user")" systemctl --user disable hiddify.service 2>/dev/null || true
-  echo "[install] hiddify.service disabled"
+if [[ -f /home/*/.config/systemd/user/hiddify.service ]] || [[ -f /root/.config/systemd/user/hiddify.service ]] || [[ -f /home/*/.config/systemd/user/HiddifyCli.service ]]; then
+  local alt_unit
+  alt_unit="${SUDO_USER:-root}"
+  for svc in hiddify.service HiddifyCli.service nekoray-bin.service; do
+    sudo -u "$alt_unit" XDG_RUNTIME_DIR="/run/user/$(id -u "$alt_unit")" systemctl --user disable "$svc" 2>/dev/null || true
+  done
+  echo "[install] hiddify-family user services disabled"
 fi
 
 echo "[install] nftables: no TPROXY rules applied (mode = SOCKS-only since 2026-07-09)"
@@ -99,6 +101,23 @@ install -m 0644 "$PROJECT_DIR/sing-box.service" "/etc/systemd/system/${SERVICE_N
 systemctl daemon-reload
 systemctl enable --now "$SERVICE_NAME"
 echo "[install] ${SERVICE_NAME}.service enabled and started"
+
+if [[ "${SKIP_FAILOVER:-0}" != "1" ]]; then
+  install -d -m 0755 /usr/local/libexec/sing-box-vpn
+  if [[ ! -e /usr/local/libexec/sing-box-vpn/failover.sh ]]; then
+    install -m 0755 "$PROJECT_DIR/failover.sh" /usr/local/libexec/sing-box-vpn/failover.sh
+  fi
+  install -d -m 0755 /usr/local/bin
+  ln -sf /usr/local/libexec/sing-box-vpn/failover.sh /usr/local/bin/vpn-failover
+  if [[ ! -e /usr/local/bin/vpn ]]; then
+    ln -sf "$PROJECT_DIR/vpn" /usr/local/bin/vpn
+  fi
+  install -m 0644 "$PROJECT_DIR/contrib/systemd/vpn-failover.service" /etc/systemd/system/vpn-failover.service
+  install -m 0644 "$PROJECT_DIR/contrib/systemd/vpn-failover.timer"   /etc/systemd/system/vpn-failover.timer
+  systemctl daemon-reload
+  systemctl enable --now vpn-failover.timer
+  echo "[install] vpn-failover.timer enabled and started (every 5 min)"
+fi
 
 systemctl enable nftables 2>/dev/null || true
 if command -v nft >/dev/null; then
