@@ -18,6 +18,15 @@
         "detour": "direct"
       },
       {
+        "tag": "dns-lan",
+        "address": "udp://192.168.0.1:53",
+        "detour": "direct"
+      },
+      {
+        "type": "hosts",
+        "tag": "dns-system-hosts"
+      },
+      {
         "tag": "dns-local",
         "address": "local",
         "detour": "direct"
@@ -27,6 +36,10 @@
       {
         "domain": "cp.cloudflare.com",
         "server": "dns-remote"
+      },
+      {
+        "domain_suffix": ".local",
+        "server": "dns-lan"
       },
       {
         "domain_suffix": ".ru",
@@ -86,11 +99,22 @@
         "action": "hijack-dns"
       },
       {
+        "port": 9090,
         "ip_cidr": [
           "127.0.0.0/8",
           "::1/128"
         ],
         "action": "reject"
+      },
+      {
+        "action": "resolve",
+        "server": "dns-system-hosts",
+        "rule_set": "private-domains"
+      },
+      {
+        "action": "resolve",
+        "server": "dns-lan",
+        "rule_set": "private-domains"
       },
       {
         "rule_set": "private-domains",
