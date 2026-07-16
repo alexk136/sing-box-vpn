@@ -1,0 +1,12 @@
+[Unit]
+Description=sing-box VPN failover probe (per-user)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/libexec/sing-box-vpn
+EnvironmentFile=-%h/.config/vpn-failover.env
+ExecStart=%h/.local/bin/vpn-failover
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=30s
+Nice=10

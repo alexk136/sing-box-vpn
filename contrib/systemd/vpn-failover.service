@@ -1,0 +1,16 @@
+[Unit]
+Description=sing-box VPN failover probe
+After=sing-box.service
+Requires=sing-box.service
+ConditionPathExists=/usr/local/bin/vpn-failover
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/usr/local/libexec/sing-box-vpn
+EnvironmentFile=-/etc/default/vpn-failover
+ExecStart=/usr/local/bin/vpn-failover
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=30s
+Nice=10

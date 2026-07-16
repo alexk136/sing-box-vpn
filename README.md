@@ -15,6 +15,21 @@ sudo ./vpn use my-vps
 vpn test
 ```
 
+## Optional: auto-failover
+
+`failover.sh` + `contrib/systemd/vpn-failover.timer` probe the active
+profile every 5 minutes; if SOCKS stops responding, the timer rotates
+to the first working profile. Install:
+
+```bash
+sudo cp contrib/systemd/vpn-failover.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now vpn-failover.timer
+```
+
+See [docs/FAILOVER.md](docs/FAILOVER.md) for the user-level unit,
+environment overrides, and exit-code reference.
+
 ## TL;DR
 
 | Action | Command |
@@ -130,6 +145,7 @@ Run through this on a fresh host before relying on the system.
 - [ ] `journalctl -u $SERVICE_NAME -f | grep -iE 'error|warn|disconnected'` streams into your log alert
 - [ ] A daily `vpn test` round from cron, with failure notifications
 - [ ] `SystemMaxUse` on the journal so the unit can't fill `/var/log/journal`
+- [ ] Auto-failover: `systemctl enable --now vpn-failover.timer` — rotates to a working profile within 5 minutes of an active profile becoming unreachable (see [docs/FAILOVER.md](docs/FAILOVER.md))
 
 ### Reversibility
 

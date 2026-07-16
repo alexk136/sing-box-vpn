@@ -13,20 +13,27 @@ $PROJECT_DIR/
 ├── ARCHITECTURE.md                 # this file
 ├── LICENSE                         # MIT
 ├── .gitignore                      # editor / shell / OS noise
-├── vpn                          # CLI manager (on/off/use/add/del/...)
+├── vpn                             # CLI manager (on/off/use/add/del/...)
 ├── generate-config.sh              # build /etc/sing-box/config.json
-├── install.sh                      # first-time installer (nftables, systemd, profiles)
+├── install.sh                      # first-time installer
 ├── rollback.sh                     # full revert
-├── apply-profiles.sh               # copy profiles/*.json -> /etc/sing-box/profiles/
+├── apply-profiles.sh                # copy profiles/*.json -> /etc/sing-box/profiles/
 ├── test-all.sh                     # loop over every profile and test via SOCKS
+├── failover.sh                     # optional: probe active, rotate on failure
 ├── sing-box-config.json            # template (mixed-in + selector + DNS)
-├── sing-box.service                # systemd unit (in /etc/systemd/system/)
+├── sing-box.service                # systemd unit
+├── contrib/
+│   └── systemd/
+│       ├── vpn-failover.service          # system-level failover unit
+│       ├── vpn-failover.timer            # every 5 minutes
+│       ├── vpn-failover-user.service     # per-user variant
+│       └── vpn-failover-user.timer
 ├── profiles/                       # gitignored runtime profile set (real, sensitive)
 └── docs/
     ├── PROFILES.md                 # profile schema, how to add new ones
     ├── IPV6.md                     # IPv4+IPv6 setup notes
-    ├── OPERATIONS.md               # common ops: rotate key, change profile, ...
-    └── CHANGELOG.md                # redesign history
+    ├── OPERATIONS.md               # common ops
+    └── FAILOVER.md                 # failover.sh install + tuning
 ```
 
 ## Runtime (managed, not in this directory)
@@ -37,65 +44,30 @@ $PROJECT_DIR/
 | `/etc/sing-box/profiles/*.json` | updated by `apply-profiles.sh` | runtime profile set |
 | `/etc/sing-box/active_profile` | written by `vpn use` | which profile is active |
 | `/etc/systemd/system/sing-box.service` | copied by `install.sh` | systemd unit |
+| `/etc/systemd/system/vpn-failover.{service,timer}` | copied by user from `contrib/systemd/` | optional auto-failover |
 | `/var/log/sing-box.log` | written by sing-box | log |
-| `/etc/nftables.conf` | optional | not used (TPROXY disabled 2026-07-09) |
+| `/etc/nftables.conf` | optional | not used (TPROXY disabled) |
 
 ## Data flow
 
 ```
 profiles/<name>.json  ──generate-config.sh──>  /etc/sing-box/config.json
-                          (uses template
-                           sing-box-config.json
-                           + the active profile)
 
 profiles/*.json  ─────apply-profiles.sh──────>  /etc/sing-box/profiles/*.json
-                          (also validates)
 
-profiles/*.json  ─────test-all.sh────────────>  per-profile exit status + colo= line
-                          (curl through SOCKS)
-```
+profiles/*.json  ─────test-all.sh────────────>  per-profile exit status
 
-`vpn` is the human-facing orchestrator. The Python blocks inside it
-are deliberately inline rather than a separate module so the whole
-thing is `git checkout`able as a single file.
-
-## Why SOCKS, not TPROXY
-
-TPROXY mode is intentionally not shipped. It is brittle on kernel
-upgrades (policy-routing rules disappear on `systemctl restart`,
-causing traffic blackouts) and requires host-level nftables/iptables
-setup that varies per distribution. SOCKS at `127.0.0.1:12334` (and
-`[::1]:12334` from the `mixed` inbound binding `::`) is portable
-across distributions and integrates with the standard tooling the
-rest of the system provides (per-app SOCKS proxy). Non-KDE CLIs must
-specify `--socks5-hostname 127.0.0.1:12334` explicitly.
-
-## Why no fix-* scripts anymore
-
-Up to 2026-07-09 this directory accumulated seven iterative fix
-scripts (`fix-policy-routing.sh`, `-v2`, `-v3`, `fix-tproxy.sh`,
-`fix-udp-crash.sh`, `fix-routing-and-restore.sh`,
-`sing-box-tproxy-routing.service`, plus `disable-tproxy.sh`). Their
-goal was to keep TPROXY alive. After 2026-07-09 they were dead code —
-`bash_history` confirms none was ever invoked again. The 2026-07-16
-redesign (`docs/CHANGELOG.md`) deletes them via `git rm`.
-
-If TPROXY ever needs to come back, those scripts are preserved in the
-git history at commit `697f5b7` (the baseline). Bring them back with:
-
-```bash
-git show 697f5b7 -- fix-tproxy.sh | git apply
+vpn service    ─────failover.sh (timer)────>  rotate to first working profile
 ```
 
 ## Auto-discovery contract
 
-Anything in `profiles/*.json` is a profile. Each must satisfy the
-schema in [docs/PROFILES.md](docs/PROFILES.md) — at minimum: `type`,
-`server`, `server_port`. The active profile is the value in
+Anything in `profiles/*.json` (top-level, not in `examples/`) is a
+profile. Each must satisfy the schema in
+[docs/PROFILES.md](docs/PROFILES.md) — at minimum: `type`, `server`,
+`server_port`. The active profile is the value in
 `/etc/sing-box/active_profile`, which `vpn use <name>` writes and
 `generate-config.sh` reads.
-
-This is the single contract:
 
 | Reader | Reads | Writes | Triggers |
 |---|---|---|---|
@@ -104,16 +76,29 @@ This is the single contract:
 | `vpn use <name>` | `/etc/sing-box/active_profile` | `/etc/sing-box/active_profile`, `/etc/sing-box/config.json`, restarts `sing-box.service` | manual |
 | `generate-config.sh` | `sing-box-config.json` + `/etc/sing-box/profiles/<active>.json` | `/etc/sing-box/config.json` | called from `vpn use` |
 | `test-all.sh` | `profiles/*.json` | — | manual |
+| `failover.sh` | active profile via SOCKS probe | rotates `vpn use` to first working profile | optional, via systemd timer |
 
 Drop a new profile into `profiles/`, run `sudo ./apply-profiles.sh`
-**once** to copy to runtime, then `sudo vpnuse <name>` to switch.
+**once** to copy to runtime, then `sudo vpn use <name>` to switch.
+For automatic rotation when the active profile dies, install
+`contrib/systemd/vpn-failover.timer` (see `docs/FAILOVER.md`).
+
+## Why SOCKS, not TPROXY
+
+TPROXY mode is intentionally not shipped. It is brittle on kernel
+upgrades (policy-routing rules disappear on `systemctl restart`,
+causing traffic blackouts) and requires host-level nftables/iptables
+setup that varies per distribution. SOCKS at `127.0.0.1:12334` (and
+`[::1]:12334` from the `mixed` inbound binding `::`) is portable
+across distributions. Non-KDE CLIs must specify
+`--socks5-hostname 127.0.0.1:12334` explicitly.
 
 ## Git handling
 
-The whole `profiles/` directory is **gitignored** —
-`.gitignore`: `profiles/` and `profiles/**`. Anything you put in there
-stays local and never leaks into commit history. Templates live in
-the tracked `docs/examples/` directory.
+The whole `profiles/` directory is **gitignored** — `profiles/` and
+`profiles/**` in `.gitignore`. Anything you put in there stays local
+and never leaks into commit history. Templates live in the tracked
+`docs/examples/` directory.
 
-To add a real profile: `sudo ./vpn add <name> '<url>'` — writes
-only to disk, never to git.
+To add a real profile: `sudo ./vpn add <name> '<url>'` — writes only
+to disk, never to git.
