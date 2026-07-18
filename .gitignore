@@ -30,3 +30,8 @@ Thumbs.db
 # values. See docs/PROFILES.md for details.
 profiles/
 profiles/**
+logs/
+
+# Share URI output (contains credentials, regenerate via share-uri-only.sh)
+share-uri.txt
+share-uri-clean.txt
