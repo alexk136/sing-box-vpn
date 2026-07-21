@@ -1,0 +1,43 @@
+#!/bin/bash
+# NetworkManager dispatcher: re-apply sing-box TPROXY routing on network events.
+# Triggers on: up, dhcp4-change, hostname (NOT route-change to avoid loops).
+# Uses table 200 (NOT 100, which NetworkManager manages).
+
+LOG_TAG="sing-box-tproxy-dispatcher"
+log() { logger -t "$LOG_TAG" -- "$*"; }
+
+IFACE="$1"
+ACTION="$2"
+
+# Skip non-relevant events. route-change is excluded: it fires on every
+# route modification (including ones WE make), which would cause restart loops.
+case "$ACTION" in
+    up|dhcp4-change|reapply|hostname) ;;
+    *) exit 0 ;;
+esac
+
+# Skip non-relevant interfaces
+case "$IFACE" in
+    lo|veth*|br-*|docker*|virbr*|vb-*) exit 0 ;;
+esac
+
+# Re-add the TPROXY route in table 200 (NM doesn't manage table 200)
+if /sbin/ip route replace default dev lo table 200 2>/dev/null; then
+    log "ok: re-added table 200 route for iface=$IFACE"
+else
+    log "FAIL: ip route replace exit=$?"
+fi
+
+# Re-add ip rule
+/sbin/ip rule add fwmark 0x1 lookup 200 priority 50 2>/dev/null
+
+# Force sing-box to re-resolve default interface (UDP binding)
+/usr/bin/systemctl reload-or-restart sing-box.service 2>/dev/null
+
+# Verify nft table is still loaded; if not, restart tproxy service to reload it
+if ! /usr/sbin/nft list table inet sing-box >/dev/null 2>&1; then
+    log "nft table missing, restarting tproxy service"
+    /usr/bin/systemctl restart sing-box-tproxy-routing
+fi
+
+exit 0

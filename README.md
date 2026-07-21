@@ -30,6 +30,24 @@ sudo systemctl enable --now vpn-failover.timer
 See [docs/FAILOVER.md](docs/FAILOVER.md) for the user-level unit,
 environment overrides, and exit-code reference.
 
+## Optional: TPROXY (system-wide transparent interception)
+
+By default `sing-box-vpn` is **SOCKS-only**: apps that respect
+`http_proxy`/`all_proxy` or have explicit SOCKS configuration get
+tunneled. `contrib/tproxy/` adds an optional **transparent interception**
+layer — every TCP/UDP packet from user processes gets redirected through
+sing-box, no per-app config needed.
+
+```bash
+sudo contrib/tproxy/install-tproxy.sh    # install
+sudo contrib/tproxy/uninstall-tproxy.sh  # remove
+```
+
+Includes a 1-minute watchdog timer and a NetworkManager dispatcher that
+re-applies routing on WiFi/Ethernet events. See
+[docs/TPROXY.md](docs/TPROXY.md) for full details, troubleshooting, and
+implementation notes.
+
 ## TL;DR
 
 | Action | Command |
@@ -64,8 +82,10 @@ and [docs/PROFILES.md](docs/PROFILES.md) for the profile schema.
 Notes:
 
 - `vpn` is bash + Python 3 (`#!` shebang, embedded Python heredoc).
-- TPROXY is **off** by default (transparent redirect paths are not
-  shipped in this project). The default mode is SOCKS-only.
+- TPROXY is **off** by default. To enable system-wide transparent
+  interception, run `sudo contrib/tproxy/install-tproxy.sh` after
+  the basic install (or `INSTALL_TPROXY=1 sudo ./install.sh`). See
+  [docs/TPROXY.md](docs/TPROXY.md).
 - Mobile clients connect to SOCKS `127.0.0.1:12334` over SSH tunnel
   or per-device WireGuard; some clients can import `hysteria2://` /
   `vless://` share links directly.

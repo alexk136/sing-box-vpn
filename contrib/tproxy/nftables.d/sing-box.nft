@@ -1,0 +1,61 @@
+#!/sbin/nft -f
+
+# sing-box TPROXY ruleset
+# Loaded by `sing-box-tproxy-routing.service` (sing-box-tproxy-routing.service)
+#
+# Provides system-wide transparent interception for user traffic:
+#   - chain prerouting: external responses + locally-generated traffic
+#                       that was routed via lo (table 200) get TPROXY'd
+#                       to sing-box listening socket on :12335.
+#   - chain output:    locally-generated user (UID != root) traffic
+#                       is marked with fwmark 0x1, which causes
+#                       ip rule fwmark 0x1 -> table 200 -> lo loop.
+#
+# Exclusions (so loop-prevention and LAN access still work):
+#   - LAN ranges (10/8, 127/8, 172.16/12, 192.168/16) are returned.
+#   - DNS to LAN resolver (192.168.0.1:53) is returned.
+#   - Root-owned traffic (sing-box itself, systemd services) is returned
+#     in chain output so sing-box's own DNS / tunnel handshake goes direct.
+#   - VPN server IP and sing-box's own listening ports are excluded
+#     to avoid loops.
+#
+# Note: this file MUST NOT contain `flush ruleset` (would wipe Docker's
+# NAT chains in /etc/nftables.conf). We only declare our table here.
+
+table inet sing-box {
+    chain prerouting {
+        type filter hook prerouting priority mangle; policy accept;
+
+        # Don't redirect LAN traffic
+        ip daddr { 10.0.0.0/8, 127.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
+
+        # Don't hijack local DNS to LAN resolver
+        udp dport 53 ip daddr 192.168.0.1 return
+
+        # TPROXY all other TCP/UDP (incoming from external)
+        meta l4proto { tcp, udp } tproxy to :12335 counter accept
+    }
+
+    chain output {
+        type route hook output priority mangle; policy accept;
+
+        # Skip root-owned traffic (sing-box runs as root + systemd services)
+        # Loop prevention: sing-box's own outbound goes direct.
+        meta skuid root return
+
+        # Don't redirect LAN traffic
+        ip daddr { 10.0.0.0/8, 127.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
+
+        # Don't redirect local DNS
+        udp dport 53 ip daddr 192.168.0.1 return
+
+        # Don't redirect traffic to the VPN server itself
+        ip daddr 5.45.116.75 return
+
+        # Don't redirect sing-box's own listening sockets
+        meta l4proto { tcp, udp } th dport { 9090, 12334, 12335 } return
+
+        # Mark all other TCP/UDP local traffic -> fwmark 0x1 -> table 200 -> lo
+        meta l4proto { tcp, udp } meta mark set 0x00000001 counter accept
+    }
+}

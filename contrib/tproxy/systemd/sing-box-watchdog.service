@@ -1,0 +1,9 @@
+[Unit]
+Description=sing-box TPROXY watchdog (verify VPN + auto-fix table 200)
+After=sing-box.service sing-box-tproxy-routing.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/sing-box-vpn/sing-box-tproxy-watchdog.sh
+SuccessExitStatus=0
+Nice=10

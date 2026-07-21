@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-07-21 — `contrib/tproxy/` subsystem added
+
+Adds an optional, opt-in transparent-proxy layer so every TCP/UDP packet
+from user processes is redirected through sing-box without per-app SOCKS
+configuration.
+
+- `contrib/tproxy/nftables.d/sing-box.nft` — `chain prerouting` (TPROXY)
+  + `chain output` (mark + ip rule fwmark 0x1 → table 200 → lo).
+- `contrib/tproxy/systemd/sing-box-tproxy-routing.service` — loads nft
+  + sets ip rule + route in table 200. Table **200** is used (NOT 100,
+  which `NetworkManager`'s `99-ecmp-wifi.sh` flushes on every WiFi
+  `up` event).
+- `contrib/tproxy/systemd/sing-box-watchdog.{service,timer,sh}` —
+  every 1 minute: verifies TPROXY chain + rule + table 200, auto-fixes
+  if missing. Probes external IP as user `alex` (via `runuser`) so the
+  probe goes through TPROXY instead of bypassing it via the
+  `meta skuid root return` loop-prevention rule.
+- `contrib/tproxy/networkmanager/dispatcher.d/30-sing-box-tproxy` —
+  re-applies `default dev lo table 200` and `ip rule add fwmark 0x1
+  lookup 200` on `up`/`dhcp4-change`/`hostname` events.
+- `contrib/tproxy/install-tproxy.sh` — idempotent installer; also
+  auto-runs from `install.sh` when `INSTALL_TPROXY=1` is set.
+- `contrib/tproxy/uninstall-tproxy.sh` — full rollback.
+
+`install.sh` learned `INSTALL_TPROXY=1` and an interactive prompt at
+the end of install. TPROXY stays **off by default** — SOCKS-only mode
+is preserved.
+
+See [docs/TPROXY.md](docs/TPROXY.md).
+
 ## 2026-07-16 — sing-box 1.13.14 migration (commits 8ae0d24, 77c6850, ade9048)
 
 ### Required sing-box version: 1.13.0 or newer

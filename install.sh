@@ -96,6 +96,7 @@ if [[ -f /home/*/.config/systemd/user/hiddify.service ]] || [[ -f /root/.config/
 fi
 
 echo "[install] nftables: no TPROXY rules applied (mode = SOCKS-only since 2026-07-09)"
+echo "[install] to enable system-wide transparent proxy: sudo $PROJECT_DIR/contrib/tproxy/install-tproxy.sh"
 
 install -m 0644 "$PROJECT_DIR/sing-box.service" "/etc/systemd/system/${SERVICE_NAME}.service"
 systemctl daemon-reload
@@ -175,3 +176,24 @@ echo "Test:  curl https://cloudflare.com/cdn-cgi/trace"
 echo "Stop:  sudo $PROJECT_DIR/vpn off"
 echo "Logs:  journalctl -u $SERVICE_NAME -f"
 echo "Rollback: sudo $PROJECT_DIR/rollback.sh"
+echo
+
+# Optional: install TPROXY subsystem for system-wide transparent interception
+if [[ "${INSTALL_TPROXY:-0}" == "1" ]]; then
+  echo
+  echo "=== INSTALL_TPROXY=1: installing TPROXY subsystem ==="
+  if [[ -x "$PROJECT_DIR/contrib/tproxy/install-tproxy.sh" ]]; then
+      "$PROJECT_DIR/contrib/tproxy/install-tproxy.sh"
+  else
+      echo "ERROR: $PROJECT_DIR/contrib/tproxy/install-tproxy.sh not found" >&2
+      exit 5
+  fi
+elif [[ "${INSTALL_TPROXY:-0}" == "0" ]] && [[ -t 0 ]]; then
+  # Interactive prompt only on a tty
+  read -r -p "Install TPROXY subsystem for system-wide interception? [y/N] " ans
+  case "$ans" in
+    [Yy]|[Yy][Ee][Ss])
+      "$PROJECT_DIR/contrib/tproxy/install-tproxy.sh"
+      ;;
+  esac
+fi

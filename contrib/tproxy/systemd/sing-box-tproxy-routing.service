@@ -1,0 +1,39 @@
+[Unit]
+Description=sing-box TPROXY policy routing (nft + ip rule + table 200)
+Documentation=https://sing-box.sagernet.org
+After=network-pre.target
+Before=network.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# --- 1. Reload sing-box nft table (idempotent: delete then load) ---
+# We do NOT use nftables.service because /etc/nftables.conf may contain
+# Docker-generated iptables-nft syntax that plain `nft` cannot parse.
+ExecStart=-/usr/sbin/nft delete table inet sing-box
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/sing-box.nft
+
+# --- 2. ip rule for fwmark 0x1 -> table 200 ---
+# Table 200 (NOT 100) is used because NetworkManager manages table 100
+# via /etc/NetworkManager/dispatcher.d/99-ecmp-wifi.sh which flushes it
+# on every WiFi `up` event.
+ExecStart=-/sbin/ip rule del fwmark 0x1 lookup 200 priority 50
+ExecStart=/sbin/ip rule add fwmark 0x1 lookup 200 priority 50
+ExecStop=-/sbin/ip rule del fwmark 0x1 lookup 200 priority 50
+
+# --- 3. Route in table 200: marked packets go via lo (loops back to prerouting tproxy) ---
+# `default` (unicast via lo) is more durable than `local 0.0.0.0/0`.
+ExecStart=/sbin/ip route replace default dev lo table 200
+ExecStop=-/sbin/ip route del default dev lo table 200
+
+# --- 4. Self-verification (note: shell redirection requires /bin/sh -c) ---
+ExecStartPost=/bin/sh -c '/usr/sbin/nft list table inet sing-box >/dev/null'
+ExecStartPost=/bin/sh -c 'test -n "$(/sbin/ip route show table 200)"'
+
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
