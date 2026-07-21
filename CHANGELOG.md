@@ -1,10 +1,21 @@
 # Changelog
 
-## 2026-07-21 — `contrib/tproxy/` subsystem added
+## 2026-07-21 — `contrib/tproxy/` subsystem added + container bypass fix
 
 Adds an optional, opt-in transparent-proxy layer so every TCP/UDP packet
 from user processes is redirected through sing-box without per-app SOCKS
 configuration.
+
+**Important:** Container traffic (Docker bridge subnets, 172.16.0.0/12) is
+**excluded** from TPROXY. Reason: sing-box accepts the packet and sends
+it through the VPN, but the response back to the container
+(src=public_ip, dst=container_ip) traverses the host's FORWARD chain
+where the default `-P FORWARD DROP` policy (and the lack of an explicit
+ACCEPT for `src=public_ip → br-*` direction) silently kills the return
+packet. Net result without the exclusion: TCP from containers times
+out. With the exclusion: containers go direct via Docker MASQUERADE,
+host still goes via VPN. To put containers behind the VPN, route them
+via SOCKS (`127.0.0.1:12334`) or set up per-network policy routing.
 
 - `contrib/tproxy/nftables.d/sing-box.nft` — `chain prerouting` (TPROXY)
   + `chain output` (mark + ip rule fwmark 0x1 → table 200 → lo).

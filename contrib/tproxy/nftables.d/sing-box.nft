@@ -1,9 +1,9 @@
 #!/sbin/nft -f
 
 # sing-box TPROXY ruleset
-# Loaded by `sing-box-tproxy-routing.service` (sing-box-tproxy-routing.service)
+# Loaded by `sing-box-tproxy-routing.service` (via /etc/systemd/system/sing-box-tproxy-routing.service)
 #
-# Provides system-wide transparent interception for user traffic:
+# Provides system-wide transparent interception for HOST-ORIGINATED traffic:
 #   - chain prerouting: external responses + locally-generated traffic
 #                       that was routed via lo (table 200) get TPROXY'd
 #                       to sing-box listening socket on :12335.
@@ -11,9 +11,26 @@
 #                       is marked with fwmark 0x1, which causes
 #                       ip rule fwmark 0x1 -> table 200 -> lo loop.
 #
+# CONTAINER TRAFFIC BYPASSES TPROXY:
+#   Forwarded packets from Docker bridges (src 172.16.0.0/12) and locally-
+#   generated packets with src 172.16.0.0/12 are returned. They reach
+#   the internet via Docker's bridge + MASQUERADE directly.
+#
+#   Why: sing-box's TPROXY inbound accepts these packets and forwards them
+#   through the VPN tunnel, but the response back to the container
+#   (src=public_ip, dst=container_ip) traverses the host's FORWARD chain
+#   where Docker's per-bridge ACCEPT rules don't cover the path, and the
+#   default `-P FORWARD DROP` policy kills the return packet. Net result:
+#   SYN goes out, SYN-ACK never reaches the container, TCP times out.
+#
+#   If you need containers to use the VPN, route per-container via the
+#   SOCKS proxy (127.0.0.1:12334) or set up per-network policy routing
+#   separately — out of scope for this TPROXY subsystem.
+#
 # Exclusions (so loop-prevention and LAN access still work):
 #   - LAN ranges (10/8, 127/8, 172.16/12, 192.168/16) are returned.
 #   - DNS to LAN resolver (192.168.0.1:53) is returned.
+#   - Container subnets (172.16.0.0/12) — see above.
 #   - Root-owned traffic (sing-box itself, systemd services) is returned
 #     in chain output so sing-box's own DNS / tunnel handshake goes direct.
 #   - VPN server IP and sing-box's own listening ports are excluded
@@ -32,7 +49,10 @@ table inet sing-box {
         # Don't hijack local DNS to LAN resolver
         udp dport 53 ip daddr 192.168.0.1 return
 
-        # TPROXY all other TCP/UDP (incoming from external)
+        # Don't TPROXY forwarded container traffic (src from Docker bridge)
+        ip saddr 172.16.0.0/12 return
+
+        # TPROXY all other TCP/UDP
         meta l4proto { tcp, udp } tproxy to :12335 counter accept
     }
 
@@ -42,6 +62,11 @@ table inet sing-box {
         # Skip root-owned traffic (sing-box runs as root + systemd services)
         # Loop prevention: sing-box's own outbound goes direct.
         meta skuid root return
+
+        # Don't TPROXY locally-generated container traffic (root UID,
+        # but the source IP is the container — happens with bind mounts
+        # or unshare -n from a container).
+        ip saddr 172.16.0.0/12 return
 
         # Don't redirect LAN traffic
         ip daddr { 10.0.0.0/8, 127.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
